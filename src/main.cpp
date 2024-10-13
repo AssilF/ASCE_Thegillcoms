@@ -9,12 +9,40 @@
 
 // byte pico_frame[13]={0,0,0,0,0,0,0,0,0,0,0,0,0}; //dummy data
 
+IPAddress local_IP(4,4,4,100);
+IPAddress gateway(4,4,4,100);
+IPAddress subnet(255,255,255,0);
+const char* ssid     = "Thegill Soul";
+const char* password = "ASCE321#";
+
+void startUDPServer();
+void receiveUDPPackets();
+void testMotors(uint8_t clientID);
+void sendResponseToApp(IPAddress deviceIP);
+
+float joystick1X = 0.0, joystick1Y = 0.0;
+float joystick2X = 0.0, joystick2Y = 0.0;
+float sliderValue = 0.0;
+float temperature = 25.0;
+float batteryVoltage = 3.7;
+int s1Value = 0, s2Value = 0, s3Value = 0, s4Value = 0;  
+int m1Value = 0, m2Value = 0;  // For storing values (Arm Motors)
+
+unsigned long lastUDPPacketTime = 0;
+unsigned long udpTimeout = 5000;  
+const unsigned int udpPort = 4210;  
+
+WiFiUDP udp;
+
+char incomingPacket[255];
+String receivedMessage;
+
 struct control_frame
 {
   public:
-    uint8_t flag_set=0x11;
+    uint8_t flag_set=0x00;
 
-    int left_top_motor_target=0;
+    int left_top_motor_target=0; //Theoretically the control frame should only consist of the right and the left speeds no ? but still, I will be sending the entire control frame and if this gets problematic it'll have to be sorted
     int left_bot_motor_target=0;
     int right_top_motor_target=0;
     int right_bot_motor_target=0;
@@ -22,7 +50,7 @@ struct control_frame
 
     int arm_rotation_speed=0;
     uint8_t arm_servo_pose=0;
-    uint8_t elbow_servo_pose=0;
+    int elbow_servo_pose=0;
     int arm_extension_speed=0;
     uint8_t pitch_servo_pose=0;
     uint8_t yaw_servo_pose=0;
@@ -44,7 +72,7 @@ void picoPush(/*flags,LTmot,LBmot,RTmot,RBmot,Intrp,ArmRotation,ArmPose,ElbowPos
       Wire.beginTransmission(0x17);
     }
     Wire.write(transmission_frame[i]);
-    if(buffer_partition_integral_count>30)
+    if(buffer_partition_integral_count>31)
     {buffer_partition_integral_count=0;Wire.endTransmission();}
   }
   // Wire.beginTransmission(0x17);
@@ -61,7 +89,10 @@ void setup() {
   Wire.setClock(400*1000);
   Wire.begin();
   
-  WiFi.begin("eAse","Akila10101947##@");
+  WiFi.softAPConfig(local_IP, gateway, subnet);
+  WiFi.softAP(ssid,password,2,0,4);
+  
+  startUDPServer();
 
   //Init UART (Debug)
   Serial.begin(9600);
@@ -86,6 +117,20 @@ void setup() {
 void loop() 
 {
     Serial.println("Pushing packet");
-    pico_frame.left_bot_motor_target++;
+
+    receiveUDPPackets();
+
+    // Only call sendResponseToApp if a UDP packet was received
+    if (lastUDPPacketTime > 0) 
+    { // Check if any UDP packet was received
+    IPAddress senderIP = udp.remoteIP(); // Get the IP address of the sender
+    sendResponseToApp(senderIP); // Send response to the app
+    }
+
+    // Send temperature and battery status every 5 seconds if no UDP packet is received
+    if (millis() - lastUDPPacketTime > udpTimeout) {
+    //sendTemperatureAndBattery();
+    }
+
     picoPush(); 
 }
