@@ -187,16 +187,27 @@ void sendResponseToApp(IPAddress deviceIP) {
 
 
 
-
+  bool blinker;
 
 void setup() {
   setCpuFrequencyMhz(240);
   //Init i2c
   Wire.setClock(400*1000);
   Wire.begin();
-  
-  WiFi.softAPConfig(local_IP, gateway, subnet);
-  WiFi.softAP(ssid,password,2,0,4);
+
+  //Wifi Init: 
+
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    blinker=!blinker;
+    digitalWrite(LED_BUILTIN,blinker);
+    delay(500);
+    Serial.println("Connecting to WiFi...");
+  }
+
+  // WiFi.softAPConfig(local_IP, gateway, subnet);
+  // WiFi.softAP(ssid,password,2,0,4);
   
   startUDPServer();
 
@@ -210,6 +221,23 @@ unsigned long millisdiff;
 
 void loop() 
 {
+    if(WiFi.status()!= WL_CONNECTED)
+    { 
+      pico_frame.arm_extension_speed=0;
+      pico_frame.arm_rotation_speed=0;
+      pico_frame.motor_power=0;
+      pico_frame.motor_bias=0;
+      picoPush();
+      WiFi.disconnect();
+      Serial.println("Disconnected, attempting reconnect, probing:");
+      do{
+      WiFi.begin(ssid, password);
+      blinker=!blinker;
+      digitalWrite(LED_BUILTIN,blinker);
+      delay(500);
+      Serial.println("Connecting to WiFi...");
+      } while (WiFi.status() != WL_CONNECTED);
+    }
     receiveUDPPackets();
 
     // Only call sendResponseToApp if a UDP packet was received
