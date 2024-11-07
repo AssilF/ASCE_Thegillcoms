@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Wire.h>
+#include <ESP32Servo.h>
 #include "Thegill.h"
 
 //SDA 21
@@ -19,7 +20,7 @@ IPAddress local_IP(4,4,4,100);
 IPAddress gateway(4,4,4,100);
 IPAddress subnet(255,255,255,0);
 const char* ssid     = "Thegill Soul";
-const char* password = "ASCE321#";
+const char* password = "AASCE321#";
 
 float joystick1X = 0.0, joystick1Y = 0.0;
 float joystick2X = 0.0, joystick2Y = 0.0;
@@ -32,6 +33,8 @@ int m1Value = 0, m2Value = 0;  // For storing values (Arm Motors)
 unsigned long lastUDPPacketTime = 0;
 unsigned long udpTimeout = 5000;  
 const unsigned int udpPort = 4210;  
+
+Servo basketservo;
 
 struct control_frame
 {
@@ -62,7 +65,7 @@ void startUDPServer() {
   Serial.printf("UDP server started at IP: %s, port: %d\n", WiFi.localIP().toString().c_str(), udpPort);
 }
 bool i2c_reset_flag;
-
+bool app_status;
 unsigned char transmission_frame[sizeof(pico_frame)];
 
 void picoPush() //program is literally "byte" banging the i2c coms, could use some optimizations by increasing buffer size or putting half buffers here ig
@@ -92,6 +95,7 @@ void picoPush() //program is literally "byte" banging the i2c coms, could use so
   }
 }
 
+int basketpose;
 
 void receiveUDPPackets() {
    int packetSize = udp.parsePacket();
@@ -100,7 +104,6 @@ void receiveUDPPackets() {
      int len = udp.read(incomingPacket, 255);
     if (len > 0) incomingPacket[len] = 0;
     receivedMessage = String(incomingPacket);
-    
     switch (receivedMessage.charAt(0))
     {
     case 'J':
@@ -122,22 +125,36 @@ void receiveUDPPackets() {
         pico_frame.arm_servo_pose=receivedMessage.substring(3).toInt();
         break;
       case '1':
-        pico_frame.arm_rotation_speed=receivedMessage.substring(3).toFloat();
+        pico_frame.arm_extension_speed=receivedMessage.substring(3).toFloat();
         break;
       case '2':
-        pico_frame.elbow_servo_pose=receivedMessage.substring(3).toInt();
-        break;
-      case '3':
         pico_frame.pitch_servo_pose=receivedMessage.substring(3).toInt();
         break;
+      case '3':
+      pico_frame.elbow_servo_pose=receivedMessage.substring(3).toInt();
+        
+        break;
       case '4':
-        pico_frame.yaw_servo_pose=receivedMessage.substring(3).toInt();
+       pico_frame.grip_servo_pose=receivedMessage.substring(3).toInt();
         break;
       case '5':
-        pico_frame.grip_servo_pose=receivedMessage.substring(3).toInt();
+       pico_frame.yaw_servo_pose=receivedMessage.substring(3).toInt();
+        
         break;
       case '6':
-        pico_frame.arm_extension_speed=receivedMessage.substring(3).toFloat();
+      pico_frame.arm_rotation_speed=receivedMessage.substring(3).toFloat();
+        
+        break;
+
+      case 'l':
+      switch (receivedMessage.charAt(6))
+      {
+      case '1':
+        //pin 18 for basket servo
+        basketpose=receivedMessage.substring(8).toFloat();
+        break;
+      
+      }
         break;
       }
     break;
@@ -186,7 +203,7 @@ void sendResponseToApp(IPAddress deviceIP) {
 }
 
 
-
+String handShakeCode;
   bool blinker;
 
 void setup() {
@@ -205,12 +222,17 @@ void setup() {
     delay(500);
     Serial.println("Connecting to WiFi...");
   }
-
+  Serial.print("Connected to:");
+  Serial.println(WiFi.gatewayIP());
+  Serial.print("As:");
+  Serial.println(WiFi.localIP());
   // WiFi.softAPConfig(local_IP, gateway, subnet);
   // WiFi.softAP(ssid,password,2,0,4);
   
   startUDPServer();
 
+
+  basketservo.attach(18);
   //Init Serial (Debug)
   pinMode(LED_BUILTIN,OUTPUT);
   Serial.begin(9600);
@@ -223,6 +245,9 @@ void loop()
 {
     if(WiFi.status()!= WL_CONNECTED)
     { 
+      app_status=0;
+      udp.stop();
+      udp.begin(udpPort);
       pico_frame.arm_extension_speed=0;
       pico_frame.arm_rotation_speed=0;
       pico_frame.motor_power=0;
@@ -237,9 +262,29 @@ void loop()
       delay(500);
       Serial.println("Connecting to WiFi...");
       } while (WiFi.status() != WL_CONNECTED);
+      Serial.print("Connected to:");
+      Serial.println(WiFi.gatewayIP());
+      Serial.print("As:");
+      Serial.println(WiFi.localIP());
+      Serial.println("Now attempting to connect to the app...");
+      // do
+      // {
+      //   Serial.println("Sending UDP IP...");
+      //   udp.beginPacket(WiFi.gatewayIP(),4210);
+      //   handShakeCode=String("ESP:")+WiFi.localIP();
+      //   udp.write((const uint8_t*)handShakeCode.c_str(),handShakeCode.length());
+      //   udp.endPacket();
+      //   delay(100);
+      //   receiveUDPPackets();
+      //   if(WiFi.status()!=WL_CONNECTED)
+      //   {
+      //     break;
+      //   }
+      // }while (app_status==0);
+      Serial.println("Connection Re-Established!");
     }
     receiveUDPPackets();
-
+    basketservo.write(map(basketpose,0,100,0,180));
     // Only call sendResponseToApp if a UDP packet was received
     if (millis()-lastUDPPacketTime > 600) 
     { // Check if any UDP packet was received
